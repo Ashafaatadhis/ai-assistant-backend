@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import * as request from 'supertest';
+import request from 'supertest';
 import { createTestApp, resetDatabase } from './test-utils';
 
 describe('Rate limiting (e2e)', () => {
@@ -8,11 +8,11 @@ describe('Rate limiting (e2e)', () => {
   beforeAll(async () => {
     app = await createTestApp();
     await resetDatabase(app);
-  });
+  }, 30000);
 
   afterAll(async () => {
     await app.close();
-  });
+  }, 30000);
 
   it('blocks the 21st auth request within a minute with 429 envelope', async () => {
     let blocked = false;

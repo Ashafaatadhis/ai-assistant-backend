@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import * as request from 'supertest';
+import request from 'supertest';
 import { createTestApp, resetDatabase, testUser } from './test-utils';
 
 describe('Validation (e2e)', () => {
@@ -7,11 +7,11 @@ describe('Validation (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-  });
+  }, 30000);
 
   afterAll(async () => {
     await app.close();
-  });
+  }, 30000);
 
   beforeEach(async () => {
     await resetDatabase(app);

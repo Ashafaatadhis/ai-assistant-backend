@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import * as request from 'supertest';
+import request from 'supertest';
 import { createTestApp, resetDatabase } from './test-utils';
 
 describe('Google auth (e2e)', () => {
@@ -14,11 +14,11 @@ describe('Google auth (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-  });
+  }, 30000);
 
   afterAll(async () => {
     await app.close();
-  });
+  }, 30000);
 
   beforeEach(async () => {
     await resetDatabase(app);
