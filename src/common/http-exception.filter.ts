@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { ThrottlerException } from '@nestjs/throttler';
 import { Response } from 'express';
+import { AppException } from '../auth/auth.errors';
 
 interface ErrorEnvelope {
   success: false;
@@ -24,6 +25,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<Response>();
+
+    if (exception instanceof AppException) {
+      this.logger.warn(`${exception.httpStatus} ${exception.humanMessage}`);
+      const body: ErrorEnvelope = {
+        success: false,
+        message: exception.humanMessage,
+        data: null,
+        error: exception.code,
+      };
+      response.status(exception.httpStatus).json(body);
+      return;
+    }
+
     const { status, message, details } = this.parse(exception);
 
     this.logger.warn(
