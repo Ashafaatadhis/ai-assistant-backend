@@ -2,7 +2,7 @@ import { Test } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { OAuth2Client } from 'google-auth-library';
-import { deepMock, DeepMockProxy } from 'jest-mock-extended';
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 import { AuthErrorCodes } from './auth.errors';
@@ -24,13 +24,16 @@ describe('AuthService', () => {
   };
 
   beforeEach(async () => {
-    prisma = deepMock<PrismaService>();
-    oauthClient = deepMock<OAuth2Client>();
+    prisma = mockDeep<PrismaService>();
+    oauthClient = mockDeep<OAuth2Client>();
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         AuthService,
-        JwtService,
+        {
+          provide: JwtService,
+          useValue: new JwtService({ secret: 'test-secret' }),
+        },
         { provide: PrismaService, useValue: prisma },
         {
           provide: ConfigService,
@@ -176,7 +179,7 @@ describe('AuthService', () => {
       });
       mockTokenPair();
 
-      const result = await service.googleAuth('valid-token');
+      const result = await service.googleAuth({ idToken: 'valid-token' });
 
       const createArgs = prisma.user.create.mock.calls[0][0];
       expect(createArgs?.data.authProvider).toBe('google');
@@ -186,9 +189,11 @@ describe('AuthService', () => {
     });
 
     it('rejects an invalid id token with INVALID_CREDENTIALS', async () => {
-      oauthClient.verifyIdToken.mockRejectedValue(new Error('bad token'));
+      oauthClient.verifyIdToken.mockRejectedValue(new Error('bad token') as never);
 
-      await expect(service.googleAuth('bad-token')).rejects.toMatchObject({
+      await expect(
+        service.googleAuth({ idToken: 'bad-token' }),
+      ).rejects.toMatchObject({
         code: AuthErrorCodes.INVALID_CREDENTIALS,
       });
     });
@@ -207,7 +212,7 @@ describe('AuthService', () => {
       });
       mockTokenPair();
 
-      const result = await service.refresh('a'.repeat(64));
+      const result = await service.refresh({ refreshToken: 'a'.repeat(64) });
 
       expect(prisma.refreshToken.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'rt-1' } }),
@@ -243,7 +248,7 @@ describe('AuthService', () => {
     ])('returns INVALID_REFRESH_TOKEN for %s', async (_label, record) => {
       prisma.refreshToken.findUnique.mockResolvedValueOnce(record as never);
 
-      await expect(service.refresh('a'.repeat(64))).rejects.toMatchObject({
+      await expect(service.refresh({ refreshToken: 'a'.repeat(64) })).rejects.toMatchObject({
         code: AuthErrorCodes.INVALID_REFRESH_TOKEN,
       });
     });
@@ -260,13 +265,13 @@ describe('AuthService', () => {
         createdAt: new Date(),
       });
 
-      await expect(service.logout('a'.repeat(64))).resolves.toBeUndefined();
+      await expect(service.logout({ refreshToken: 'a'.repeat(64) })).resolves.toBeUndefined();
       expect(prisma.refreshToken.update).toHaveBeenCalled();
     });
 
     it('is idempotent for unknown or already-revoked tokens', async () => {
       prisma.refreshToken.findUnique.mockResolvedValueOnce(null);
-      await expect(service.logout('a'.repeat(64))).resolves.toBeUndefined();
+      await expect(service.logout({ refreshToken: 'a'.repeat(64) })).resolves.toBeUndefined();
 
       prisma.refreshToken.findUnique.mockResolvedValueOnce({
         id: 'rt-1',
@@ -276,7 +281,7 @@ describe('AuthService', () => {
         revokedAt: new Date(),
         createdAt: new Date(),
       });
-      await expect(service.logout('a'.repeat(64))).resolves.toBeUndefined();
+      await expect(service.logout({ refreshToken: 'a'.repeat(64) })).resolves.toBeUndefined();
       expect(prisma.refreshToken.update).not.toHaveBeenCalled();
     });
   });
