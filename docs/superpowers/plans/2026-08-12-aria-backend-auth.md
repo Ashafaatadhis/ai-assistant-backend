@@ -534,6 +534,7 @@ import {
 } from '@nestjs/common';
 import { ThrottlerException } from '@nestjs/throttler';
 import { Response } from 'express';
+import { AppException } from '../auth/auth.errors';
 
 interface ErrorEnvelope {
   success: false;
@@ -550,6 +551,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<Response>();
+
+    if (exception instanceof AppException) {
+      this.logger.warn(`${exception.httpStatus} ${exception.humanMessage}`);
+      const body: ErrorEnvelope = {
+        success: false,
+        message: exception.humanMessage,
+        data: null,
+        error: exception.code,
+      };
+      response.status(exception.httpStatus).json(body);
+      return;
+    }
+
     const { status, message, details } = this.parse(exception);
 
     this.logger.warn(
@@ -926,7 +940,10 @@ describe('AuthService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         AuthService,
-        JwtService,
+        {
+          provide: JwtService,
+          useValue: new JwtService({ secret: 'test-secret' }),
+        },
         { provide: PrismaService, useValue: prisma },
         { provide: ConfigService, useValue: { get: jest.fn((key: string) => {
           const env: Record<string, string> = {
@@ -1267,7 +1284,13 @@ export class AuthService {
     }
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
     const user = await this.prisma.user.create({
-      data: { email, passwordHash, name: dto.name },
+      data: {
+        email,
+        passwordHash,
+        name: dto.name,
+        authProvider: 'email',
+        tier: 'free',
+      },
     });
     return this.buildAuthResult(user);
   }
@@ -2120,7 +2143,7 @@ git commit -m "test: e2e suites for auth flow, google, and validation"
 
 **Interfaces:**
 - Consumes: everything from Tasks 1–7.
-- Produces: 20 req/min/IP limit on `/api/auth/*` returning 429 envelope `{ success: false, message: 'Terlalu banyak permintaan, coba lagi nanti', data: null, error: 'RATE_LIMIT_EXCEEDED' }`.
+- Produces: 20 req/min/IP limit returning 429 envelope `{ success: false, message: 'Terlalu banyak permintaan, coba lagi nanti', data: null, error: 'RATE_LIMIT_EXCEEDED' }`. Implementation note: the default (unnamed) throttler + global APP_GUARD applies to every route, so `HealthController` carries `@SkipThrottle()` to keep `/api/health` unlimited.
 
 - [ ] **Step 1: Write the failing throttler e2e test** — `test/throttler.e2e-spec.ts`:
 
@@ -2187,9 +2210,7 @@ import { JwtStrategy } from './jwt.strategy';
 @Module({
   imports: [
     PassportModule,
-    ThrottlerModule.forRoot([
-      { name: 'auth', ttl: 60_000, limit: 20 },
-    ]),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 20 }]),
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
