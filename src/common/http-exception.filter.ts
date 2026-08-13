@@ -13,7 +13,7 @@ import { AppException } from '../auth/auth.errors';
 interface ErrorEnvelope {
   success: false;
   message: string;
-  data: { details: string[] } | null;
+  data: Record<string, unknown> | null;
   error: string;
 }
 
@@ -31,7 +31,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       const body: ErrorEnvelope = {
         success: false,
         message: exception.humanMessage,
-        data: null,
+        data: exception.data,
         error: exception.code,
       };
       response.status(exception.httpStatus).json(body);

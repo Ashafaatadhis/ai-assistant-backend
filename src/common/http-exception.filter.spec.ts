@@ -61,6 +61,25 @@ describe('AllExceptionsFilter', () => {
     });
   });
 
+  it('passes structured AppException data through to the envelope', () => {
+    new AllExceptionsFilter().catch(
+      new AppException(
+        'RESEND_TOO_SOON',
+        'Tunggu sebentar sebelum mengirim ulang',
+        429,
+        { retryAfterSeconds: 42 },
+      ),
+      host,
+    );
+    expect(status).toHaveBeenCalledWith(429);
+    expect(json).toHaveBeenCalledWith({
+      success: false,
+      message: 'Tunggu sebentar sebelum mengirim ulang',
+      data: { retryAfterSeconds: 42 },
+      error: 'RESEND_TOO_SOON',
+    });
+  });
+
   it('maps unknown exceptions to 500 INTERNAL_ERROR', () => {
     new AllExceptionsFilter().catch(new Error('boom'), host);
     expect(status).toHaveBeenCalledWith(500);

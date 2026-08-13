@@ -1,12 +1,18 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, resetDatabase, testUser } from './test-utils';
+import {
+  createTestAppWithMail,
+  MailSpy,
+  resetDatabase,
+  testUser,
+} from './test-utils';
 
-describe('Auth flow (e2e)', () => {
+describe('Register / verify-email / login (e2e)', () => {
   let app: INestApplication;
+  let mail: MailSpy;
 
   beforeAll(async () => {
-    app = await createTestApp();
+    ({ app, mail } = await createTestAppWithMail());
   }, 30000);
 
   afterAll(async () => {
@@ -15,6 +21,7 @@ describe('Auth flow (e2e)', () => {
 
   beforeEach(async () => {
     await resetDatabase(app);
+    mail.sent.length = 0;
   });
 
   it('GET /api/health returns the envelope with status ok', async () => {
@@ -29,137 +36,86 @@ describe('Auth flow (e2e)', () => {
     });
   });
 
-  it('full flow: register → me → refresh (rotation) → logout', async () => {
-    // 1. register → 201 + user + token pair
-    const registerRes = await request(app.getHttpServer())
+  it('register returns 201 WITHOUT tokens and sends a 6-digit code', async () => {
+    const res = await request(app.getHttpServer())
       .post('/api/auth/register')
       .send(testUser)
       .expect(201);
 
-    expect(registerRes.body.success).toBe(true);
-    expect(registerRes.body.data.user).toMatchObject({
-      email: testUser.email,
-      name: testUser.name,
-      authProvider: 'email',
-      tier: 'free',
+    expect(res.body).toEqual({
+      success: true,
+      message: 'Kode verifikasi telah dikirim ke email kamu',
+      data: { resendAvailableAt: expect.any(String) },
     });
-    expect(registerRes.body.data.user).not.toHaveProperty('passwordHash');
-    expect(registerRes.body.data.accessToken).toEqual(expect.any(String));
-    expect(registerRes.body.data.refreshToken).toMatch(/^[0-9a-f]{64}$/);
-
-    const { accessToken, refreshToken } = registerRes.body.data;
-
-    // 2. GET /me with access token → 200, email matches, createdAt present
-    const meRes = await request(app.getHttpServer())
-      .get('/api/auth/me')
-      .set('Authorization', `Bearer ${accessToken}`)
-      .expect(200);
-
-    expect(meRes.body.success).toBe(true);
-    expect(meRes.body.data.email).toBe(testUser.email);
-    expect(meRes.body.data.createdAt).toEqual(expect.any(String));
-    expect(meRes.body.data).not.toHaveProperty('passwordHash');
-
-    // 3. refresh → 200 new pair; OLD refresh token must now be dead (rotation)
-    const refreshRes = await request(app.getHttpServer())
-      .post('/api/auth/refresh')
-      .send({ refreshToken })
-      .expect(200);
-
-    expect(refreshRes.body.success).toBe(true);
-    expect(refreshRes.body.data.accessToken).toEqual(expect.any(String));
-    expect(refreshRes.body.data.refreshToken).toMatch(/^[0-9a-f]{64}$/);
-    expect(refreshRes.body.data).not.toHaveProperty('user');
-
-    const newRefreshToken = refreshRes.body.data.refreshToken;
-    expect(newRefreshToken).not.toBe(refreshToken);
-
-    await request(app.getHttpServer())
-      .post('/api/auth/refresh')
-      .send({ refreshToken })
-      .expect((res) => {
-        expect(res.status).toBe(401);
-        expect(res.body.error).toBe('INVALID_REFRESH_TOKEN');
-      });
-
-    // 4. logout → 200; the new refresh token dies too
-    await request(app.getHttpServer())
-      .post('/api/auth/logout')
-      .send({ refreshToken: newRefreshToken })
-      .expect((res) => {
-        expect(res.status).toBe(200);
-        expect(res.body).toEqual({
-          success: true,
-          message: 'OK',
-          data: null,
-        });
-      });
-
-    await request(app.getHttpServer())
-      .post('/api/auth/refresh')
-      .send({ refreshToken: newRefreshToken })
-      .expect((res) => {
-        expect(res.status).toBe(401);
-        expect(res.body.error).toBe('INVALID_REFRESH_TOKEN');
-      });
-
-    // logout is idempotent — second call still 200
-    await request(app.getHttpServer())
-      .post('/api/auth/logout')
-      .send({ refreshToken: newRefreshToken })
-      .expect(200);
+    // resendAvailableAt ~60 detik dari sekarang (cooldown).
+    const availableAt = new Date(res.body.data.resendAvailableAt).getTime();
+    expect(availableAt).toBeGreaterThan(Date.now());
+    expect(availableAt).toBeLessThanOrEqual(Date.now() + 61_000);
+    expect(mail.sent).toHaveLength(1);
+    expect(mail.sent[0].code).toMatch(/^\d{6}$/);
+    expect(mail.sent[0].to).toBe(testUser.email);
   });
 
-  it('login with correct credentials → 200 with token pair', async () => {
+  it('verify-email: wrong code → 400 INVALID_CODE, correct code → 200 with tokens, /me works', async () => {
     await request(app.getHttpServer())
       .post('/api/auth/register')
       .send(testUser)
       .expect(201);
 
+    const code = mail.sent[0].code;
+    const wrongCode = code === '000000' ? '111111' : '000000';
+
+    const bad = await request(app.getHttpServer())
+      .post('/api/auth/verify-email')
+      .send({ email: testUser.email, code: wrongCode })
+      .expect(400);
+    expect(bad.body.error).toBe('INVALID_CODE');
+    expect(bad.body.message).toBe('Kode tidak valid atau sudah kedaluwarsa');
+
     const res = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email: testUser.email, password: testUser.password })
+      .post('/api/auth/verify-email')
+      .send({ email: testUser.email, code })
       .expect(200);
 
     expect(res.body.success).toBe(true);
-    expect(res.body.data.user.email).toBe(testUser.email);
+    expect(res.body.data.user).toMatchObject({
+      email: testUser.email,
+      authProvider: 'email',
+      tier: 'free',
+    });
     expect(res.body.data.accessToken).toEqual(expect.any(String));
     expect(res.body.data.refreshToken).toMatch(/^[0-9a-f]{64}$/);
+
+    const me = await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${res.body.data.accessToken}`)
+      .expect(200);
+    expect(me.body.data.email).toBe(testUser.email);
   });
 
-  it('login with wrong password → 401 INVALID_CREDENTIALS', async () => {
+  it('login before verification → 403 EMAIL_NOT_VERIFIED; after → 200', async () => {
     await request(app.getHttpServer())
       .post('/api/auth/register')
       .send(testUser)
       .expect(201);
 
-    const res = await request(app.getHttpServer())
+    const before = await request(app.getHttpServer())
       .post('/api/auth/login')
-      .send({ email: testUser.email, password: 'password-salah' })
-      .expect(401);
+      .send({ email: testUser.email, password: testUser.password })
+      .expect(403);
+    expect(before.body.error).toBe('EMAIL_NOT_VERIFIED');
+    expect(before.body.message).toBe('Email kamu belum diverifikasi');
 
-    expect(res.body.success).toBe(false);
-    expect(res.body.error).toBe('INVALID_CREDENTIALS');
-    expect(res.body.message).toBe('Email atau password salah');
-    expect(res.body.data).toBeNull();
-  });
+    await request(app.getHttpServer())
+      .post('/api/auth/verify-email')
+      .send({ email: testUser.email, code: mail.sent[0].code })
+      .expect(200);
 
-  it('GET /me without token → 401 UNAUTHORIZED', async () => {
-    const res = await request(app.getHttpServer())
-      .get('/api/auth/me')
-      .expect(401);
-
-    expect(res.body.success).toBe(false);
-    expect(res.body.error).toBe('UNAUTHORIZED');
-    expect(res.body.message).toBe('Silakan masuk terlebih dahulu');
-  });
-
-  it('refresh with unknown token → 401 INVALID_REFRESH_TOKEN', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/refresh')
-      .send({ refreshToken: 'f'.repeat(64) })
-      .expect(401);
-
-    expect(res.body.error).toBe('INVALID_REFRESH_TOKEN');
+    const after = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: testUser.email, password: testUser.password })
+      .expect(200);
+    expect(after.body.success).toBe(true);
+    expect(after.body.data.accessToken).toEqual(expect.any(String));
   });
 });

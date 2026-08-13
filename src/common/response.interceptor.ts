@@ -4,7 +4,9 @@ import {
   Injectable,
   NestInterceptor,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { Observable, map } from 'rxjs';
+import { SUCCESS_MESSAGE_KEY } from './success-message.decorator';
 
 export interface ResponseEnvelope<T> {
   success: boolean;
@@ -16,14 +18,21 @@ export interface ResponseEnvelope<T> {
 export class ResponseInterceptor<T>
   implements NestInterceptor<T, ResponseEnvelope<T>>
 {
+  constructor(private readonly reflector: Reflector = new Reflector()) {}
+
   intercept(
-    _context: ExecutionContext,
+    context: ExecutionContext,
     next: CallHandler<T>,
   ): Observable<ResponseEnvelope<T>> {
+    const message =
+      this.reflector.getAllAndOverride<string>(SUCCESS_MESSAGE_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]) ?? 'OK';
     return next.handle().pipe(
       map((data) => ({
         success: true,
-        message: 'OK',
+        message,
         data: data === undefined ? null : data,
       })),
     );

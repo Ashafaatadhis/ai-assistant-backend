@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import request from 'supertest';
 import { createTestApp, resetDatabase, testUser } from './test-utils';
 
@@ -62,5 +63,63 @@ describe('Validation (e2e)', () => {
       .post('/api/auth/refresh')
       .send({ refreshToken: 'bukan-hex' })
       .expect(400);
+  });
+
+  it('verify-email with non-6-digit code → 400 VALIDATION_ERROR', async () => {
+    await request(app.getHttpServer())
+      .post('/api/auth/verify-email')
+      .send({ email: testUser.email, code: '12' })
+      .expect(400);
+  });
+
+  it('verify-email for an unregistered email → 400 INVALID_CODE (uniform)', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/auth/verify-email')
+      .send({ email: 'ghost@example.com', code: '123456' })
+      .expect(400);
+
+    expect(res.body.error).toBe('INVALID_CODE');
+    expect(res.body.message).toBe('Kode tidak valid atau sudah kedaluwarsa');
+  });
+
+  it('resend-code with invalid email → 400', async () => {
+    await request(app.getHttpServer())
+      .post('/api/auth/resend-code')
+      .send({ email: 'bukan-email' })
+      .expect(400);
+  });
+
+  it('register with an already-taken email → 409 EMAIL_TAKEN envelope', async () => {
+    await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send(testUser)
+      .expect(201);
+
+    const res = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send(testUser)
+      .expect(409);
+
+    expect(res.body).toEqual({
+      success: false,
+      message: 'Email sudah terdaftar',
+      data: null,
+      error: 'EMAIL_TAKEN',
+    });
+  });
+
+  it('GET /me with an expired access token → 401 UNAUTHORIZED', async () => {
+    const jwtService = app.get(JwtService);
+    const expired = await jwtService.signAsync(
+      { sub: 'nonexistent-user' },
+      { expiresIn: '-1h' },
+    );
+
+    const res = await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${expired}`)
+      .expect(401);
+
+    expect(res.body.error).toBe('UNAUTHORIZED');
   });
 });

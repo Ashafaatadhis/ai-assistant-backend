@@ -18,14 +18,28 @@ enum UserTier {
 }
 
 model User {
-  id            String         @id @default(uuid())
-  email         String         @unique
-  passwordHash  String?
-  name          String
-  authProvider  AuthProvider   @default(email)
-  tier          UserTier       @default(free)
-  createdAt     DateTime       @default(now())
-  refreshTokens RefreshToken[]
+  id                String             @id @default(uuid())
+  email             String             @unique
+  passwordHash      String?
+  name              String
+  authProvider      AuthProvider       @default(email)
+  tier              UserTier           @default(free)
+  emailVerifiedAt   DateTime?
+  createdAt         DateTime           @default(now())
+  refreshTokens     RefreshToken[]
+  verificationCodes VerificationCode[]
+}
+
+model VerificationCode {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model RefreshToken {

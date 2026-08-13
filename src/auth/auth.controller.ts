@@ -11,12 +11,15 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
+import { SuccessMessage } from '../common/success-message.decorator';
 import { AuthService } from './auth.service';
 import { GoogleAuthDto } from './dto/google-auth.dto';
 import { LoginDto } from './dto/login.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResendCodeDto } from './dto/resend-code.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 interface AuthenticatedRequest extends Request {
@@ -29,9 +32,30 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
-  @ApiOperation({ summary: 'Daftar dengan email + password (auto-login)' })
+  @SuccessMessage('Kode verifikasi telah dikirim ke email kamu')
+  @ApiOperation({
+    summary:
+      'Daftar dengan email + password — kirim kode verifikasi, TANPA token',
+  })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
+  }
+
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verifikasi kode email — sukses menerbitkan pasangan token',
+  })
+  verifyEmail(@Body() dto: VerifyEmailDto) {
+    return this.authService.verifyEmail(dto);
+  }
+
+  @Post('resend-code')
+  @HttpCode(HttpStatus.OK)
+  @SuccessMessage('Kode verifikasi telah dikirim ulang')
+  @ApiOperation({ summary: 'Kirim ulang kode verifikasi (cooldown 60 detik)' })
+  resendCode(@Body() dto: ResendCodeDto) {
+    return this.authService.resendCode(dto);
   }
 
   @Post('login')
