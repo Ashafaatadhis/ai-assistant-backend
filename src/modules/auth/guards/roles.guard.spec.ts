@@ -2,8 +2,10 @@ import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { UserRole } from '@prisma/client';
-import { AuthErrorCodes } from './auth.errors';
+
 import { RolesGuard } from './roles.guard';
+import { AuthErrorCodes } from '../auth.errors';
+import { AccessControlService } from '../services/access-control.service';
 
 const contextWithRole = (role?: UserRole): ExecutionContext =>
   ({
@@ -21,7 +23,7 @@ describe('RolesGuard', () => {
 
   beforeEach(async () => {
     const moduleRef = await Test.createTestingModule({
-      providers: [RolesGuard, Reflector],
+      providers: [RolesGuard, Reflector, AccessControlService],
     }).compile();
     guard = moduleRef.get(RolesGuard);
     reflector = moduleRef.get(Reflector);
@@ -40,5 +42,13 @@ describe('RolesGuard', () => {
     expect(() => guard.canActivate(contextWithRole(UserRole.member))).toThrow(
       expect.objectContaining({ code: AuthErrorCodes.FORBIDDEN }),
     );
+  });
+
+  it('allows admin on a member route through role hierarchy', () => {
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue([UserRole.member]);
+
+    expect(guard.canActivate(contextWithRole(UserRole.admin))).toBe(true);
   });
 });

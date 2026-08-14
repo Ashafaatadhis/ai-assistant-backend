@@ -6,13 +6,17 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { UserRole } from '@prisma/client';
-import { AuthenticatedUser } from './authenticated-user.type';
-import { AppException, AuthErrorCodes } from './auth.errors';
-import { ROLES_KEY } from './roles.decorator';
+import { ROLES_KEY } from '../decorators/roles.decorator';
+import { AuthenticatedUser } from '../interfaces/authenticated-user.interface';
+import { AppException, AuthErrorCodes } from '../auth.errors';
+import { AccessControlService } from '../services/access-control.service';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly accessControlService: AccessControlService,
+  ) {}
 
   canActivate(context: ExecutionContext): boolean {
     const requiredRoles = this.reflector.getAllAndOverride<UserRole[]>(
@@ -25,7 +29,16 @@ export class RolesGuard implements CanActivate {
     const request = context
       .switchToHttp()
       .getRequest<{ user?: AuthenticatedUser }>();
-    if (request.user && requiredRoles.includes(request.user.role)) {
+    const user = request.user;
+    if (
+      user &&
+      requiredRoles.some((requiredRole) =>
+        this.accessControlService.isAuthorized({
+          currentRole: user.role,
+          requiredRole,
+        }),
+      )
+    ) {
       return true;
     }
     throw new AppException(

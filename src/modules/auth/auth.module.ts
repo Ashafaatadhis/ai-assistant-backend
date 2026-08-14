@@ -8,11 +8,12 @@ import { OAuth2Client } from 'google-auth-library';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
- 
+
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { MailModule } from '../mail/mail.module';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
+import { AccessControlService } from './services/access-control.service';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { RolesGuard } from './guards/roles.guard';
     JwtStrategy,
     JwtAuthGuard,
     RolesGuard,
+    AccessControlService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     {
       provide: 'GOOGLE_OAUTH_CLIENT',
