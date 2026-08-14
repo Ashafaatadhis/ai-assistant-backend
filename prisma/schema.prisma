@@ -7,6 +7,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============================================================
+// ENUMS
+// ============================================================
+
 enum AuthProvider {
   email
   google
@@ -17,17 +21,100 @@ enum UserTier {
   premium
 }
 
+enum UserRole {
+  admin
+  member
+}
+
+enum Gender {
+  male
+  female
+  other
+  undisclosed
+}
+
+enum TodoStatus {
+  pending
+  in_progress
+  completed
+  cancelled
+}
+
+enum TodoPriority {
+  low
+  medium
+  high
+  urgent
+}
+
+// Menandai apakah entity dibuat manual oleh user atau lewat AI chat.
+// Penting untuk audit trail & UX (mis. badge "dibuat oleh AI").
+enum CreationSource {
+  manual
+  ai_chat
+}
+
+enum AlarmRecurrence {
+  none
+  daily
+  weekly
+  monthly
+  custom // pakai recurrenceRule (RRULE) kalau butuh pola kompleks
+}
+
+// ============================================================
+// USER & AUTH
+// ============================================================
+
 model User {
-  id                String             @id @default(uuid())
-  email             String             @unique
-  passwordHash      String?
-  name              String
-  authProvider      AuthProvider       @default(email)
-  tier              UserTier           @default(free)
-  emailVerifiedAt   DateTime?
-  createdAt         DateTime           @default(now())
+  id              String       @id @default(uuid())
+  email           String       @unique
+  passwordHash    String?
+  name            String
+  authProvider    AuthProvider @default(email)
+  tier            UserTier     @default(free)
+  role            UserRole     @default(member)
+
+  emailVerifiedAt DateTime?
+  isActive        Boolean      @default(true) // untuk suspend/ban tanpa hard delete
+  lastLoginAt     DateTime?
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  deletedAt       DateTime?    // soft delete, konsisten dengan Todo/Alarm
+
+  profile           Profile?
   refreshTokens     RefreshToken[]
   verificationCodes VerificationCode[]
+  todos             Todo[]
+  categories        Category[]
+  alarms            Alarm[]
+
+  @@index([deletedAt])
+  @@map("users")
+}
+
+// Dipisah dari User: data profil sering berubah/optional dan tidak
+// selalu perlu ikut ke-load tiap kali query auth (mis. SELECT saat login).
+model Profile {
+  id          String    @id @default(uuid())
+  userId      String    @unique
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  avatarUrl   String?
+  bio         String?   @db.Text
+  phoneNumber String?
+  gender      Gender?
+  dateOfBirth DateTime? @db.Date
+
+  // Krusial untuk fitur alarm/reminder di app mobile lintas timezone
+  timezone    String    @default("Asia/Jakarta")
+  locale      String    @default("id-ID")
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("profiles")
 }
 
 model VerificationCode {
@@ -40,16 +127,135 @@ model VerificationCode {
   createdAt DateTime @default(now())
 
   @@index([userId])
+  @@map("verification_codes")
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String    @unique
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime  @default(now())
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  // Best practice keamanan: bantu deteksi token theft / device management
+  ipAddress  String?
+  userAgent  String?
+
+  createdAt  DateTime  @default(now())
 
   @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ============================================================
+// TODO DOMAIN
+// ============================================================
+
+// Opsional: kategori/label buatan user sendiri (best practice umum todo app)
+model Category {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name      String
+  color     String?  // hex code untuk UI mobile
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  todos     Todo[]
+
+  @@unique([userId, name])
+  @@map("categories")
+}
+
+model Todo {
+  id          String       @id @default(uuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  categoryId  String?
+  category    Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  title       String
+  description String?      @db.Text
+
+  status      TodoStatus   @default(pending)
+  priority    TodoPriority @default(medium)
+
+  dueAt       DateTime?
+  reminderAt  DateTime?
+  completedAt DateTime?
+
+  isArchived  Boolean      @default(false)
+
+  // ID notifikasi lokal yang dikembalikan OS saat reminder dijadwalkan
+  // di HP (mis. dari expo-notifications / notifee). Dipakai untuk
+  // cancel/reschedule saat todo diupdate atau dihapus.
+  localNotificationId String?
+
+  // Jejak audit sederhana: dibuat manual di app atau oleh service AI/agent
+  // eksternal. Detail percakapan/proses AI-nya ada di project terpisah,
+  // di sini cukup tahu sumbernya.
+  source      CreationSource @default(manual)
+
+  alarms      Alarm[]
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  deletedAt   DateTime?
+
+  @@index([userId])
+  @@index([userId, status])
+  @@index([userId, dueAt])
+  @@index([userId, priority])
+  @@index([userId, isArchived])
+  @@index([categoryId])
+  @@index([deletedAt])
+  @@map("todos")
+}
+
+// ============================================================
+// ALARM
+// ============================================================
+
+// Dipisah dari Todo.reminderAt karena alarm punya lifecycle sendiri:
+// bisa berdiri sendiri (tanpa todo), recurring, punya sound/snooze,
+// dan bisa dibuat otomatis oleh AI chat tanpa harus terikat todo.
+model Alarm {
+  id              String          @id @default(uuid())
+  userId          String
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  todoId          String?
+  todo            Todo?           @relation(fields: [todoId], references: [id], onDelete: SetNull)
+
+  title           String
+  triggerAt       DateTime
+  recurrence      AlarmRecurrence @default(none)
+  recurrenceRule  String?         // RRULE string, dipakai kalau recurrence = custom
+
+  isEnabled       Boolean         @default(true)
+  soundName       String?
+  snoozeMinutes   Int?
+  lastTriggeredAt DateTime?
+
+  // ID alarm/notifikasi lokal yang dikembalikan OS saat dijadwalkan di HP.
+  // Wajib disimpan supaya app bisa cancel/reschedule saat alarm diedit,
+  // dihapus, atau saat app perlu re-schedule ulang setelah reboot HP.
+  localNotificationId String?
+
+  source          CreationSource  @default(manual)
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  deletedAt       DateTime?
+
+  @@index([userId])
+  @@index([userId, triggerAt])
+  @@index([userId, isEnabled])
+  @@index([todoId])
+  @@index([deletedAt])
+  @@map("alarms")
 }

@@ -6,7 +6,7 @@ import { mockDeep, DeepMockProxy } from 'jest-mock-extended';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { MailService } from '../mail/mail.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from 'src/common/prisma/prisma.service';
 import { AuthService } from './auth.service';
 import { AuthErrorCodes } from './auth.errors';
 import * as bcrypt from 'bcrypt';

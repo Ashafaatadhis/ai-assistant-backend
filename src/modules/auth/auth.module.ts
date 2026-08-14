@@ -8,9 +8,13 @@ import { OAuth2Client } from 'google-auth-library';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
+import { PrismaModule } from '../../common/prisma/prisma.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
+    MailModule,
+    PrismaModule,
     PassportModule,
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 20 }]),
     JwtModule.registerAsync({

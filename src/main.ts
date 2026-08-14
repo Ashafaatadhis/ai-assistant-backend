@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
@@ -14,6 +14,11 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new AllExceptionsFilter());
   app.enableCors();
 
+  app.enableVersioning({
+    type: VersioningType.URI,
+    defaultVersion: "1"
+  })
+
   const config = new DocumentBuilder()
     .setTitle('Aria Backend API')
     .setDescription(
@@ -23,12 +28,12 @@ async function bootstrap(): Promise<void> {
     .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  SwaggerModule.setup('api/v1/docs', app, document);
 
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);
-  console.log(`Aria backend listening on http://localhost:${port}/api`);
-  console.log(`Swagger UI: http://localhost:${port}/api/docs`);
+  console.log(`Aria backend listening on http://localhost:${port}/api/v1`);
+  console.log(`Swagger UI: http://localhost:${port}/api/v1/docs`);
 }
 
 void bootstrap();

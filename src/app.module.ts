@@ -1,9 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { AuthModule } from './auth/auth.module';
+import { AuthModule } from './modules/auth/auth.module';
 import { HealthController } from './health/health.controller';
-import { MailModule } from './mail/mail.module';
-import { PrismaModule } from './prisma/prisma.module';
+import { TodoModule } from './modules/todo/todo.module';
 
 function validateEnv(
   config: Record<string, unknown>,
@@ -49,9 +48,8 @@ function validateEnv(
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
-    PrismaModule,
-    MailModule,
     AuthModule,
+    TodoModule,
   ],
   controllers: [HealthController],
 })

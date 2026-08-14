@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { ThrottlerException } from '@nestjs/throttler';
 import { Response } from 'express';
-import { AppException } from '../auth/auth.errors';
+import { AppException } from '../modules/auth/auth.errors';
 
 interface ErrorEnvelope {
   success: false;

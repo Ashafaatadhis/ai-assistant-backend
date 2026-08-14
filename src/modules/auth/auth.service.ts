@@ -6,7 +6,7 @@ import { Prisma } from '@prisma/client';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { MailService } from '../mail/mail.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from 'src/common/prisma/prisma.service';
 import { AppException, AuthErrorCodes } from './auth.errors';
 import { GoogleAuthDto } from './dto/google-auth.dto';
 import { LoginDto } from './dto/login.dto';

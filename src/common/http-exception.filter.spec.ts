@@ -4,7 +4,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { AllExceptionsFilter } from './http-exception.filter';
-import { AppException } from '../auth/auth.errors';
+import { AppException } from '../modules/auth/auth.errors';
 
 describe('AllExceptionsFilter', () => {
   let status: jest.Mock;
