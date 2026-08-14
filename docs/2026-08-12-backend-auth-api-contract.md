@@ -1,7 +1,7 @@
 # Aria Backend Auth — API Contract
 
 **Date:** 2026-08-12
-**Version:** 2.0
+**Version:** 2.1
 **Companion doc:** `2026-08-12-backend-auth-prd.md`
 
 Contract ini adalah sumber kebenaran bentuk request/response. Client Flutter dan implementasi backend **sama-sama** mengikuti dokumen ini.
@@ -99,6 +99,10 @@ Aturan:
 | `INVALID_REFRESH_TOKEN` | 401 | refresh token tidak dikenal / revoked / kedaluwarsa | `"Sesi berakhir, silakan masuk lagi"` |
 | `UNAUTHORIZED` | 401 | `/me` tanpa token valid | `"Silakan masuk terlebih dahulu"` |
 | `RATE_LIMIT_EXCEEDED` | 429 | melebihi 20 request/menit per IP | `"Terlalu banyak permintaan, coba lagi nanti"` |
+| `FORBIDDEN` | 403 | role tidak diizinkan | `"Kamu tidak memiliki izin untuk melakukan tindakan ini"` |
+| `ACCOUNT_DISABLED` | 403 | login akun nonaktif | `"Akun kamu dinonaktifkan"` |
+| `USER_NOT_FOUND` | 404 | target admin tidak ditemukan | `"User tidak ditemukan"` |
+| `SELF_MANAGEMENT_FORBIDDEN` | 403 | admin mengubah role/status sendiri | `"Admin tidak dapat mengubah role atau status akunnya sendiri"` |
 
 ---
 
@@ -117,6 +121,7 @@ UserPublic = {
   name: string;                       // 1–100 karakter
   authProvider: "email" | "google";
   tier: "free" | "premium";
+  role: "admin" | "member";
 }
 ```
 
@@ -127,8 +132,13 @@ Profil lengkap untuk `/me` — `UserPublic` plus tanggal daftar.
 ```ts
 UserDetail = UserPublic & {
   createdAt: string;                  // ISO 8601 UTC
+  profile: ProfilePublic | null;
 }
 ```
+
+`ProfilePublic` berisi `avatarUrl`, `bio`, `phoneNumber`, `gender`,
+`dateOfBirth`, `timezone`, dan `locale`. Field internal, hash password,
+hash token, dan kode verifikasi tidak pernah dikirim.
 
 ### TokenPair
 
@@ -227,26 +237,19 @@ LogoutRequest = {
 
 ### 5.1 POST /api/auth/register
 
-Mendaftar akun baru dengan email + password. Sukses = user dibuat **dan** langsung mendapat pasangan token (auto-login).
+Mendaftar akun baru dengan email + password. User dan profil default dibuat
+dengan role `member`, lalu kode verifikasi dikirim. Token belum diterbitkan.
 
 **Request:** `RegisterRequest`
 
-**Response sukses — `201 Created`**, `data: AuthData`:
+**Response sukses — `201 Created`**:
 
 ```json
 {
   "success": true,
-  "message": "OK",
+  "message": "Kode verifikasi telah dikirim ke email kamu",
   "data": {
-    "user": {
-      "id": "9f1c...",
-      "email": "budi@example.com",
-      "name": "Budi",
-      "authProvider": "email",
-      "tier": "free"
-    },
-    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "refreshToken": "8f3a2b...64-hex-chars"
+    "resendAvailableAt": "2026-08-12T09:31:00.000Z"
   }
 }
 ```
@@ -257,6 +260,20 @@ Mendaftar akun baru dengan email + password. Sukses = user dibuat **dan** langsu
 |---------|------|---------|
 | Email sudah terdaftar | 409 | `EMAIL_TAKEN` |
 | Validasi gagal | 400 | `VALIDATION_ERROR` |
+
+---
+
+### 5.1a POST /api/auth/verify-email
+
+Menerima `{ email, code }`. Kode valid menandai email terverifikasi, menghapus
+kode lama, memperbarui `lastLoginAt`, dan menerbitkan `AuthData`. Kode salah,
+kedaluwarsa, atau melewati batas percobaan menghasilkan `400 INVALID_CODE`.
+
+### 5.1b POST /api/auth/resend-code
+
+Menerima `{ email }`, mengganti kode lama, dan mengirim kode baru. Response
+memuat `resendAvailableAt`; cooldown menghasilkan `429 RESEND_TOO_SOON`.
+Response email tidak dikenal disamakan untuk mencegah enumerasi akun.
 
 ---
 
@@ -369,7 +386,17 @@ Profil user yang sedang login. Satu-satunya endpoint yang butuh access token.
     "name": "Budi",
     "authProvider": "email",
     "tier": "free",
-    "createdAt": "2026-08-12T09:30:00.000Z"
+    "role": "member",
+    "createdAt": "2026-08-12T09:30:00.000Z",
+    "profile": {
+      "avatarUrl": null,
+      "bio": null,
+      "phoneNumber": null,
+      "gender": null,
+      "dateOfBirth": null,
+      "timezone": "Asia/Jakarta",
+      "locale": "id-ID"
+    }
   }
 }
 ```
@@ -398,25 +425,45 @@ Health check sederhana.
 }
 ```
 
+### 5.8 User profile dan administrasi RBAC
+
+| Method | Path | Role | Fungsi |
+|--------|------|------|--------|
+| GET | `/api/users/me` | member/admin | Profil lengkap milik sendiri |
+| PATCH | `/api/users/me` | member/admin | Ubah nama dan field profil sendiri |
+| GET | `/api/admin/users?limit=&before=&role=&isActive=` | admin | Daftar user cursor-based |
+| GET | `/api/admin/users/:id` | admin | Detail aman satu user |
+| POST | `/api/admin/users` | admin | Buat akun email dengan role; verifikasi email tetap wajib |
+| PATCH | `/api/admin/users/:id/role` | admin | Ubah role user lain |
+| PATCH | `/api/admin/users/:id/status` | admin | Aktifkan/nonaktifkan user lain |
+
+Public register dan Google sign-in selalu membuat role `member`; field `role`
+dari request public diabaikan. Nonaktifkan user me-revoke semua refresh token.
+JWT hanya menyimpan `sub`; role dan status akun dibaca dari database pada tiap
+request terlindungi.
+
 ---
 
 ## 6. Contoh Flow Lengkap (dari sisi client)
 
 ```
 1. POST /api/auth/register  { email, password, name }
-   → 201, envelope: success=true, data={ user, accessToken, refreshToken }
+   → 201, kode verifikasi dikirim
+
+2. POST /api/auth/verify-email  { email, code }
+   → 200, envelope: success=true, data={ user, accessToken, refreshToken }
    → client simpan kedua token
 
-2. GET /api/auth/me  (Bearer accessToken)
+3. GET /api/auth/me  (Bearer accessToken)
    → 200, success=true, data=UserDetail
 
-3. ...15 menit kemudian accessToken kedaluwarsa, request dapat 401...
+4. ...15 menit kemudian accessToken kedaluwarsa, request dapat 401...
 
-4. POST /api/auth/refresh  { refreshToken }
+5. POST /api/auth/refresh  { refreshToken }
    → 200, success=true, data={ accessToken, refreshToken }   ← keduanya BARU
    → token lama tidak boleh dipakai lagi
 
-5. User memilih "Keluar":
+6. User memilih "Keluar":
    POST /api/auth/logout  { refreshToken }
    → 200, success=true
    → client hapus token dari penyimpanan

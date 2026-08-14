@@ -7,9 +7,12 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { OAuth2Client } from 'google-auth-library';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { JwtStrategy } from './jwt.strategy';
+import { JwtStrategy } from './strategies/jwt.strategy';
+ 
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { MailModule } from '../mail/mail.module';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
 
 @Module({
   imports: [
@@ -31,6 +34,8 @@ import { MailModule } from '../mail/mail.module';
   providers: [
     AuthService,
     JwtStrategy,
+    JwtAuthGuard,
+    RolesGuard,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     {
       provide: 'GOOGLE_OAUTH_CLIENT',
@@ -39,5 +44,6 @@ import { MailModule } from '../mail/mail.module';
       inject: [ConfigService],
     },
   ],
+  exports: [AuthService, JwtAuthGuard, RolesGuard],
 })
 export class AuthModule {}

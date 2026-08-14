@@ -4,6 +4,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { AuthenticatedUser } from './authenticated-user.type';
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
@@ -11,10 +12,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     return super.canActivate(context);
   }
 
-  handleRequest<TUser = { userId: string }>(
-    err: unknown,
-    user: TUser,
-  ): TUser {
+  handleRequest<TUser = AuthenticatedUser>(err: unknown, user: TUser): TUser {
     if (err || !user) {
       throw new UnauthorizedException('Silakan masuk terlebih dahulu');
     }

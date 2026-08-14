@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthController } from './health/health.controller';
 import { TodoModule } from './modules/todo/todo.module';
+import { UsersModule } from './modules/users/users.module';
 
 function validateEnv(
   config: Record<string, unknown>,
@@ -50,6 +51,7 @@ function validateEnv(
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     AuthModule,
     TodoModule,
+    UsersModule,
   ],
   controllers: [HealthController],
 })
